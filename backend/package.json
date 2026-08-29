@@ -1,0 +1,40 @@
+{
+  "name": "@silkflo/web3-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Indexer + read-only Fastify API for the Sepolia portfolio demo",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "api:dev": "node src/api/server.js",
+    "indexer:sync": "node src/indexer/cli.js sync",
+    "indexer:watch": "node src/indexer/cli.js watch",
+    "indexer:status": "node src/indexer/cli.js status",
+    "indexer:rebuild": "node src/indexer/cli.js rebuild",
+    "test": "node --test --test-concurrency=1 test/guard.test.js test/boundaries.test.js test/fastify-compat.test.js test/indexer.test.js test/api.test.js",
+    "test:boundaries": "node --test test/boundaries.test.js",
+    "db:test:migrate": "node scripts/db-test.js migrate",
+    "db:test:reset": "node scripts/db-test.js reset",
+    "db:test:status": "node scripts/db-test.js status"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@fastify/rate-limit": "^11.2.0",
+    "@fastify/sensible": "^6.0.5",
+    "@prisma/client": "^5.22.0",
+    "@silkflo/web3-operations-console": "file:..",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.4",
+    "fastify": "^5.12.1"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0"
+  }
+}

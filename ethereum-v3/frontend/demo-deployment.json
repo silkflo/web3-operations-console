@@ -1,0 +1,54 @@
+{
+  "_generated": "GENERATED FILE - do not edit by hand. Source: deployments/sepolia-demo-v1.json. Regenerate with: npm run sync:frontend",
+  "status": "deployed",
+  "statusNote": "Live Sepolia testnet demo environment.",
+  "environment": "portfolio-demo",
+  "chainId": 11155111,
+  "networkName": "sepolia",
+  "factoryAddress": "0xbddD01aE6B2899c507DD540E6437552006f008eA",
+  "factoryVersion": "3.0.0",
+  "deployedAt": "2026-08-28T13:54:24.000Z",
+  "deploymentBlockNumber": 11585248,
+  "explorer": {
+    "factory": "https://sepolia.etherscan.io/address/0xbddD01aE6B2899c507DD540E6437552006f008eA",
+    "deploymentTx": "https://sepolia.etherscan.io/tx/0x47b4b2c1547302523383c42ee2d010e603e1054523a7ee7024ad9fcb1f793901"
+  },
+  "splits": [
+    {
+      "key": "creator-revenue-share",
+      "title": "Creator Revenue Share",
+      "description": "A creator collaboration: three contributors on a joint video series split sponsorship revenue equally. Funded, finalized, and one contributor has withdrawn their share.",
+      "splitAddress": "0x0B8a5aAA27477dB7799e89b8a60266322406cf32",
+      "allocation": {
+        "model": "equal",
+        "participantCount": 3,
+        "perParticipantShare": "33.33%",
+        "note": "EthSplit V3 divides each funded round equally among the participants of that round. The contract has no weighted or percentage allocation."
+      }
+    },
+    {
+      "key": "product-team-bonus",
+      "title": "Product Team Bonus",
+      "description": "A software delivery scenario: a four-person team has joined to share a milestone bonus, awaiting the manager funding the round.",
+      "splitAddress": "0x36aCdDAc008630dB5e4BE3821D0776F88461ef39",
+      "allocation": {
+        "model": "equal",
+        "participantCount": 4,
+        "perParticipantShare": "25.00%",
+        "note": "EthSplit V3 divides each funded round equally among the participants of that round. The contract has no weighted or percentage allocation."
+      }
+    },
+    {
+      "key": "project-partner-settlement",
+      "title": "Project Partner Settlement",
+      "description": "A client/partner settlement: three partners have joined to settle a completed engagement, awaiting funding.",
+      "splitAddress": "0xa017f14f28CfC85AA0a61D505647C75c392E26D3",
+      "allocation": {
+        "model": "equal",
+        "participantCount": 3,
+        "perParticipantShare": "33.33%",
+        "note": "EthSplit V3 divides each funded round equally among the participants of that round. The contract has no weighted or percentage allocation."
+      }
+    }
+  ]
+}

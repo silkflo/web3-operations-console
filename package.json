@@ -1,0 +1,34 @@
+{
+  "name": "@silkflo/web3-operations-console",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Read-only Sepolia operations console: verified Solidity split contracts, an event indexer, a PostgreSQL read model, a Fastify read-only API and a Next.js frontend.",
+  "author": "Florian",
+  "license": "MIT",
+  "keywords": [
+    "ethereum",
+    "sepolia",
+    "solidity",
+    "hardhat",
+    "indexer",
+    "fastify",
+    "nextjs"
+  ],
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test:contracts": "npm --prefix ethereum-v3 test",
+    "test:demo": "npm --prefix ethereum-v3 run test:demo",
+    "test:backend": "npm --prefix backend test",
+    "verify": "npm run build && npm --prefix backend test && npm --prefix ethereum-v3 test"
+  },
+  "dependencies": {
+    "next": "^16.3.3",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

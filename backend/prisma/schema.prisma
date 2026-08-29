@@ -1,0 +1,175 @@
+// backend/prisma/schema.prisma
+//
+// PostgreSQL read model for the Sepolia portfolio demo.
+//
+// The chain is the source of truth. Everything here is a rebuildable projection
+// of it: dropping the database and re-running the indexer from
+// Factory.deploymentBlock reproduces it exactly.
+//
+// Design notes:
+//   - amounts are NUMERIC(78,0), not BigInt. Solidity uint256 exceeds int64, and
+//     78 digits covers the full uint256 range. Prisma maps this to Decimal; the
+//     application converts to BigInt at the boundary so arithmetic stays exact.
+//   - addresses and hashes are stored lowercase and compared lowercase, because
+//     RPCs are inconsistent about EIP-55 checksum casing.
+//   - ChainEvent.args is Json: the five event shapes differ, and a column per
+//     argument would either sprawl or force lossy coercion. Queries filter by
+//     indexed scalar columns (eventName, round, splitId), never by JSON path.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// The active portfolio-demo factory. One row per (chainId, address).
+model Factory {
+  id              Int      @id @default(autoincrement())
+  chainId         Int
+  address         String   @db.VarChar(42)
+  version         String?  @db.VarChar(32)
+  deploymentBlock Int
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  splits      Split[]
+  checkpoints IndexerCheckpoint[]
+
+  @@unique([chainId, address])
+  @@map("factories")
+}
+
+/// A split contract discovered from the factory's SplitCreated events.
+model Split {
+  id        Int    @id @default(autoincrement())
+  factoryId Int
+  chainId   Int
+  address   String @db.VarChar(42)
+
+  /// Title as emitted by SplitCreated; not user input.
+  title String @db.VarChar(256)
+
+  /// Manager address. Retained because it is the deployer, not a participant,
+  /// and it is already public in the deployment manifest.
+  manager String @db.VarChar(42)
+
+  factoryIndex   Int
+  createdAtBlock Int
+  createdAtTx    String    @db.VarChar(66)
+  createdAt      DateTime?
+
+  factory Factory      @relation(fields: [factoryId], references: [id], onDelete: Cascade)
+  events  ChainEvent[]
+  rounds  SplitRound[]
+
+  @@unique([chainId, address])
+  @@index([factoryId])
+  @@map("splits")
+}
+
+/// Every decoded log the indexer has persisted, factory and split alike.
+///
+/// Idempotency: (chainId, transactionHash, logIndex) uniquely identifies a log
+/// on a chain, so a duplicate delivery collides and is skipped rather than
+/// double-counted.
+model ChainEvent {
+  id      BigInt @id @default(autoincrement())
+  chainId Int
+
+  /// Emitting contract. Null splitId means it came from the factory.
+  address String @db.VarChar(42)
+  splitId Int?
+
+  eventName       String   @db.VarChar(48)
+  blockNumber     Int
+  blockHash       String   @db.VarChar(66)
+  transactionHash String   @db.VarChar(66)
+  logIndex        Int
+  blockTimestamp  DateTime?
+
+  /// Decoded arguments, uint256 values stringified to preserve precision.
+  args Json
+
+  /// Denormalized for the hot query paths; null where the event has no round.
+  round Int?
+
+  /// Denormalized uint256 amount where the event carries one.
+  amount Decimal? @db.Decimal(78, 0)
+
+  indexedAt DateTime @default(now())
+
+  split Split? @relation(fields: [splitId], references: [id], onDelete: Cascade)
+
+  @@unique([chainId, transactionHash, logIndex])
+  @@index([chainId, blockNumber])
+  @@index([splitId, eventName])
+  @@index([splitId, round])
+  @@index([eventName])
+  @@map("chain_events")
+}
+
+/// Per-round projection, rebuilt from ChainEvent after every indexing pass.
+///
+/// A projection rather than a live aggregate because the dashboard reads it on
+/// every request while it changes only when new events land.
+model SplitRound {
+  id      Int @id @default(autoincrement())
+  splitId Int
+  round   Int
+
+  joinCount Int     @default(0)
+  fundedWei Decimal @default(0) @db.Decimal(78, 0)
+
+  finalized                Boolean   @default(false)
+  finalizedAtBlock         Int?
+  finalizedTx              String?   @db.VarChar(66)
+  totalDistributedWei      Decimal   @default(0) @db.Decimal(78, 0)
+  amountPerParticipantWei  Decimal   @default(0) @db.Decimal(78, 0)
+  finalizedParticipantCount Int      @default(0)
+  remainderWei             Decimal   @default(0) @db.Decimal(78, 0)
+
+  firstBlock Int?
+  lastBlock  Int?
+
+  updatedAt DateTime @updatedAt
+
+  split Split @relation(fields: [splitId], references: [id], onDelete: Cascade)
+
+  @@unique([splitId, round])
+  @@index([splitId])
+  @@map("split_rounds")
+}
+
+/// Indexer cursor and health, one row per (chainId, factory, stream).
+///
+/// blockHash is what makes conservative reorg detection possible: before
+/// extending the cursor the indexer re-reads the block at lastIndexedBlock and
+/// compares hashes. A mismatch means the chain moved under us.
+model IndexerCheckpoint {
+  id        Int    @id @default(autoincrement())
+  chainId   Int
+  factoryId Int
+
+  /// Allows separate cursors later (e.g. "factory" vs "splits") without a
+  /// migration. Currently a single "main" stream.
+  stream String @default("main") @db.VarChar(32)
+
+  lastIndexedBlock Int
+  lastIndexedHash  String? @db.VarChar(66)
+
+  lastSyncStartedAt   DateTime?
+  lastSyncCompletedAt DateTime?
+  lastError           String?   @db.Text
+
+  eventsIndexed Int      @default(0)
+  reorgCount    Int      @default(0)
+  updatedAt     DateTime @updatedAt
+
+  factory Factory @relation(fields: [factoryId], references: [id], onDelete: Cascade)
+
+  @@unique([chainId, factoryId, stream])
+  @@map("indexer_checkpoints")
+}

@@ -1,0 +1,62 @@
+{
+  "name": "ethereum-v3",
+  "version": "3.0.0",
+  "description": "Sepolia EthSplit/SplitFactory contracts, Hardhat tests and the demo deployment manifest for the Web3 Operations Console",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "test:unit": "hardhat test test/unit/*.test.js",
+    "test:security": "hardhat test test/security/*.test.js",
+    "test:fuzz": "hardhat test test/fuzz/*.test.js",
+    "test:invariant": "hardhat test test/invariant/*.test.js",
+    "coverage": "hardhat coverage --testfiles \"test/**/*.test.js\"",
+    "gas": "cross-env REPORT_GAS=true hardhat test",
+    "clean": "hardhat clean",
+    "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia",
+    "deploy:local": "hardhat run scripts/deploy.js --network localhost",
+    "verify:sepolia": "hardhat verify --network sepolia",
+    "node": "hardhat node",
+    "test:demo": "hardhat test test/demo/Manifest.test.js test/demo/Scenarios.test.js test/demo/Workflow.test.js test/demo/NotDeployed.test.js test/demo/ConsoleUI.test.js test/demo/Intelligence.test.js",
+    "deploy:demo:sepolia": "hardhat run scripts/deploy-demo.js --network sepolia",
+    "seed:demo:sepolia": "hardhat run scripts/seed-demo.js --network sepolia",
+    "sync:frontend": "node scripts/sync-frontend-config.js",
+    "verify:demo": "node scripts/sync-frontend-config.js --check",
+    "deploy:demo:sepolia:dry": "cross-env DRY_RUN=true hardhat run scripts/deploy-demo.js --network sepolia",
+    "estimate:demo": "hardhat run scripts/estimate-demo.js",
+    "seed:demo:sepolia:dry": "cross-env DRY_RUN=true hardhat run scripts/seed-demo.js --network sepolia",
+    "estimate:lifecycle": "hardhat run scripts/estimate-lifecycle.js",
+    "lifecycle:demo:sepolia": "hardhat run scripts/lifecycle-demo.js --network sepolia",
+    "lifecycle:demo:sepolia:dry": "cross-env DRY_RUN=true hardhat run scripts/lifecycle-demo.js --network sepolia",
+    "verify:demo:sepolia": "hardhat run scripts/verify-demo.js --network sepolia"
+  },
+  "keywords": [
+    "ethereum",
+    "solidity",
+    "hardhat",
+    "smart-contracts",
+    "web3"
+  ],
+  "author": "Florian",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^2.0.0",
+    "@nomicfoundation/hardhat-ethers": "^3.0.0",
+    "@nomicfoundation/hardhat-ignition": "^0.15.0",
+    "@nomicfoundation/hardhat-network-helpers": "^1.0.0",
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@nomicfoundation/hardhat-verify": "^2.0.0",
+    "chai": "^4.3.7",
+    "cross-env": "^7.0.3",
+    "ethers": "^6.13.0",
+    "hardhat": "^2.22.0",
+    "hardhat-gas-reporter": "^1.0.10",
+    "solidity-coverage": "^0.8.12"
+  },
+  "dependencies": {
+    "@silkflo/web3-operations-console": "file:..",
+    "dotenv": "^17.4.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

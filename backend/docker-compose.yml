@@ -1,0 +1,32 @@
+# backend/docker-compose.yml
+#
+# Local development PostgreSQL only.
+#
+# The port is bound to 127.0.0.1 on purpose: the database must never be
+# reachable from outside the developer's machine, and in production it is bound
+# to localhost or a private Docker network on the VPS. Vercel and the browser
+# never talk to it.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: flo-web3-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: web3
+      POSTGRES_PASSWORD: web3_local_dev_only
+      POSTGRES_DB: web3_index_dev
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - web3_pgdata:/var/lib/postgresql/data
+      # Creates web3_index_test alongside web3_index_dev on first init.
+      # Both live in one local-only service; tests may only touch the former.
+      - ./docker/init-databases.sql:/docker-entrypoint-initdb.d/10-init-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U web3 -d web3_index_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  web3_pgdata:

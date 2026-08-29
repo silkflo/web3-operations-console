@@ -1,0 +1,40 @@
+# Dependencies
+**/node_modules/
+
+# Next.js
+**/.next/
+**/out/
+.vercel/
+
+# Hardhat / Solidity
+**/artifacts/
+**/cache/
+**/typechain-types/
+**/coverage/
+coverage.json
+gas-report.txt
+
+# Environment — never commit real values. Only *.env.example is tracked.
+**/.env
+**/.env.*
+!**/.env.example
+
+# Local databases and dumps
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+**/*.sql.gz
+**/*.dump
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+**/logs/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

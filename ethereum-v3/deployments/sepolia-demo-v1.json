@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "environment": "portfolio-demo",
+  "description": "Clean Sepolia testnet factory for the Web3 AI Console portfolio demo. Testnet only — no real funds, no production use.",
+  "chainId": 11155111,
+  "networkName": "sepolia",
+  "factoryAddress": "0xbddD01aE6B2899c507DD540E6437552006f008eA",
+  "factoryVersion": "3.0.0",
+  "deployerAddress": "0xDc58ea580383E9C323110cFe818465E69B86D5B4",
+  "deploymentTxHash": "0x47b4b2c1547302523383c42ee2d010e603e1054523a7ee7024ad9fcb1f793901",
+  "deploymentBlockNumber": 11585248,
+  "deployedAt": "2026-08-28T13:54:24.000Z",
+  "explorer": {
+    "factory": "https://sepolia.etherscan.io/address/0xbddD01aE6B2899c507DD540E6437552006f008eA",
+    "deploymentTx": "https://sepolia.etherscan.io/tx/0x47b4b2c1547302523383c42ee2d010e603e1054523a7ee7024ad9fcb1f793901"
+  },
+  "contracts": {
+    "SplitFactory": {
+      "version": "3.0.0",
+      "solidity": "0.8.24"
+    },
+    "EthSplit": {
+      "version": "3.0.0",
+      "solidity": "0.8.24"
+    }
+  },
+  "splits": [
+    {
+      "key": "creator-revenue-share",
+      "title": "Creator Revenue Share",
+      "description": "A creator collaboration: three contributors on a joint video series split sponsorship revenue equally. Funded, finalized, and one contributor has withdrawn their share.",
+      "splitAddress": "0x0B8a5aAA27477dB7799e89b8a60266322406cf32",
+      "manager": "0xDc58ea580383E9C323110cFe818465E69B86D5B4",
+      "creationTxHash": "0xc61bf0b70f0cd9ece402e3e1c9ba96087c23066106f2a4e843240ff26290ae75",
+      "creationBlockNumber": 11585256,
+      "participants": [
+        "0xDE84E7BDe4B724aDC4076Bef5BC15e029b596127",
+        "0xe02d3c6F4CAAb7764617A3115904786402D9057a",
+        "0x15f04516EbBFeA6418a35Df341e03308a6565AB5"
+      ],
+      "onChainParticipantCount": 0,
+      "allocation": {
+        "model": "equal",
+        "participantCount": 3,
+        "perParticipantShare": "33.33%",
+        "note": "EthSplit V3 divides each funded round equally among the participants of that round. The contract has no weighted or percentage allocation."
+      },
+      "demoStatus": "withdrawn",
+      "lifecycle": {
+        "joins": [
+          {
+            "participant": "0xDE84E7BDe4B724aDC4076Bef5BC15e029b596127",
+            "txHash": "0xa9c53269656dfba1f4ef020718614ee153ca0a0cc59bfe166f0be60d0358a798",
+            "blockNumber": 11585257
+          },
+          {
+            "participant": "0xe02d3c6F4CAAb7764617A3115904786402D9057a",
+            "txHash": "0x3755e2cdff78813c05fcaa4c7f01ffcdfe4c054f68eda18f7a45766d7046b890",
+            "blockNumber": 11585258
+          },
+          {
+            "participant": "0x15f04516EbBFeA6418a35Df341e03308a6565AB5",
+            "txHash": "0xd4bf47afdaf49773b3419763578a4d23562f3d111f42818f8bbb248931c992ef",
+            "blockNumber": 11585259
+          }
+        ],
+        "funding": {
+          "amountEth": "0.001",
+          "txHash": "0x7df9799097fe4d929603fe7a2ee4a69827024e5879d67597b11d9991820a5a04",
+          "blockNumber": 11585274,
+          "explorer": "https://sepolia.etherscan.io/tx/0x7df9799097fe4d929603fe7a2ee4a69827024e5879d67597b11d9991820a5a04"
+        },
+        "finalization": {
+          "txHash": "0xbdadab4a580de3510b62a8d3d5a01085689b725089e0bec93a411dba9af489c6",
+          "blockNumber": 11585275,
+          "explorer": "https://sepolia.etherscan.io/tx/0xbdadab4a580de3510b62a8d3d5a01085689b725089e0bec93a411dba9af489c6"
+        },
+        "withdrawals": [
+          {
+            "participant": "0xDE84E7BDe4B724aDC4076Bef5BC15e029b596127",
+            "amountEth": "0.000333333333333333",
+            "txHash": "0x85543d98510b42e161353baa6181aae5f25e9094f3668fbcf4f2def5a0038aff",
+            "blockNumber": 11585276,
+            "explorer": "https://sepolia.etherscan.io/tx/0x85543d98510b42e161353baa6181aae5f25e9094f3668fbcf4f2def5a0038aff"
+          }
+        ]
+      },
+      "explorer": {
+        "split": "https://sepolia.etherscan.io/address/0x0B8a5aAA27477dB7799e89b8a60266322406cf32",
+        "creationTx": "https://sepolia.etherscan.io/tx/0xc61bf0b70f0cd9ece402e3e1c9ba96087c23066106f2a4e843240ff26290ae75"
+      }
+    },
+    {
+      "key": "product-team-bonus",
+      "title": "Product Team Bonus",
+      "description": "A software delivery scenario: a four-person team has joined to share a milestone bonus, awaiting the manager funding the round.",
+      "splitAddress": "0x36aCdDAc008630dB5e4BE3821D0776F88461ef39",
+      "manager": "0xDc58ea580383E9C323110cFe818465E69B86D5B4",
+      "creationTxHash": "0xd73146bc0bf1f9e582cd5a5ab584a7a573d3a54ce23eb10aeac9d07c4ee601c8",
+      "creationBlockNumber": 11585260,
+      "participants": [
+        "0xDE84E7BDe4B724aDC4076Bef5BC15e029b596127",
+        "0xe02d3c6F4CAAb7764617A3115904786402D9057a",
+        "0x15f04516EbBFeA6418a35Df341e03308a6565AB5",
+        "0x4387647F28fD0F29324339327528FB15c56A08e5"
+      ],
+      "onChainParticipantCount": 4,
+      "allocation": {
+        "model": "equal",
+        "participantCount": 4,
+        "perParticipantShare": "25.00%",
+        "note": "EthSplit V3 divides each funded round equally among the participants of that round. The contract has no weighted or percentage allocation."
+      },
+      "demoStatus": "active",
+      "lifecycle": {
+        "joins": [
+          {
+            "participant": "0xDE84E7BDe4B724aDC4076Bef5BC15e029b596127",
+            "txHash": "0xcd94cab12d567d3c1bf44bc59b2a46696e78a4f7b1ba0df474a7f0c6cdb08bfb",
+            "blockNumber": 11585262
+          },
+          {
+            "participant": "0xe02d3c6F4CAAb7764617A3115904786402D9057a",
+            "txHash": "0x4d1b62881ac94b657ea5697ac5175b953951e03d813734201bb63d6df33735d7",
+            "blockNumber": 11585263
+          },
+          {
+            "participant": "0x15f04516EbBFeA6418a35Df341e03308a6565AB5",
+            "txHash": "0x985d233b9297198f0d6439b7c4d76557831d6477b6426cbd382beb97a8f6f5a6",
+            "blockNumber": 11585265
+          },
+          {
+            "participant": "0x4387647F28fD0F29324339327528FB15c56A08e5",
+            "txHash": "0x7ab2ad78e26f6ae9d6f2d75c3a55433573ae841cc2ab76e3950840cf19dc81d3",
+            "blockNumber": 11585267
+          }
+        ],
+        "funding": null,
+        "finalization": null,
+        "withdrawals": []
+      },
+      "explorer": {
+        "split": "https://sepolia.etherscan.io/address/0x36aCdDAc008630dB5e4BE3821D0776F88461ef39",
+        "creationTx": "https://sepolia.etherscan.io/tx/0xd73146bc0bf1f9e582cd5a5ab584a7a573d3a54ce23eb10aeac9d07c4ee601c8"
+      }
+    },
+    {
+      "key": "project-partner-settlement",
+      "title": "Project Partner Settlement",
+      "description": "A client/partner settlement: three partners have joined to settle a completed engagement, awaiting funding.",
+      "splitAddress": "0xa017f14f28CfC85AA0a61D505647C75c392E26D3",
+      "manager": "0xDc58ea580383E9C323110cFe818465E69B86D5B4",
+      "creationTxHash": "0x85361929665bae6b8a0bc41dd75e44a6c3f988368181f9dbdf2a66e5966314f1",
+      "creationBlockNumber": 11585268,
+      "participants": [
+        "0xDE84E7BDe4B724aDC4076Bef5BC15e029b596127",
+        "0xe02d3c6F4CAAb7764617A3115904786402D9057a",
+        "0x15f04516EbBFeA6418a35Df341e03308a6565AB5"
+      ],
+      "onChainParticipantCount": 3,
+      "allocation": {
+        "model": "equal",
+        "participantCount": 3,
+        "perParticipantShare": "33.33%",
+        "note": "EthSplit V3 divides each funded round equally among the participants of that round. The contract has no weighted or percentage allocation."
+      },
+      "demoStatus": "active",
+      "lifecycle": {
+        "joins": [
+          {
+            "participant": "0xDE84E7BDe4B724aDC4076Bef5BC15e029b596127",
+            "txHash": "0x7331164af2dea43ca1353269f0fd8b9448c509c4fba03dcfbbbe3e60be40fda1",
+            "blockNumber": 11585269
+          },
+          {
+            "participant": "0xe02d3c6F4CAAb7764617A3115904786402D9057a",
+            "txHash": "0x3888cb23d407898929d9414bed5a8e08bded7405d9e27f96fd5049770618fa07",
+            "blockNumber": 11585271
+          },
+          {
+            "participant": "0x15f04516EbBFeA6418a35Df341e03308a6565AB5",
+            "txHash": "0xcbbd3f5005d03aaf9ff1ac26f1b5f9b4d963c5710954c3e3c72533d458b67f39",
+            "blockNumber": 11585272
+          }
+        ],
+        "funding": null,
+        "finalization": null,
+        "withdrawals": []
+      },
+      "explorer": {
+        "split": "https://sepolia.etherscan.io/address/0xa017f14f28CfC85AA0a61D505647C75c392E26D3",
+        "creationTx": "https://sepolia.etherscan.io/tx/0x85361929665bae6b8a0bc41dd75e44a6c3f988368181f9dbdf2a66e5966314f1"
+      }
+    }
+  ],
+  "seededAt": "2026-08-28T13:59:19.852Z",
+  "lifecycleAt": "2026-08-28T14:00:20.780Z"
+}

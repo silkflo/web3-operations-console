@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: web3
+          POSTGRES_PASSWORD: web3_ci_test_only
+          POSTGRES_DB: web3_index_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U web3 -d web3_index_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://web3:web3_ci_test_only@127.0.0.1:5432/web3_index_dev?schema=public
+      DATABASE_URL_TEST: postgresql://web3:web3_ci_test_only@127.0.0.1:5432/web3_index_test?schema=public
+      SEPOLIA_RPC_URL: https://rpc.example.invalid
+      WEB3_FACTORY_ADDRESS: "0xbddd01ae6b2899c507dd540e6437552006f008ea"
+      WEB3_FACTORY_DEPLOYMENT_BLOCK: "11585248"
+      NEXT_PUBLIC_WEB3_API_URL: https://web3-api.example.com
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            ethereum-v3/package-lock.json
+
+      - name: Install frontend
+        run: npm ci
+
+      - name: Install backend
+        run: npm --prefix backend ci
+
+      - name: Install contracts
+        run: npm --prefix ethereum-v3 ci
+
+      - name: Migrate isolated test database
+        run: npm --prefix backend run db:test:migrate
+
+      - name: Test backend
+        run: npm --prefix backend test
+
+      - name: Test contracts and demo
+        run: npm --prefix ethereum-v3 test
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Audit production dependencies
+        run: |
+          npm audit --omit=dev
+          npm --prefix backend audit --omit=dev
+          npm --prefix ethereum-v3 audit --omit=dev
