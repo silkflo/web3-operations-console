@@ -286,6 +286,7 @@ const Web3Console = () => {
     <>
       <Head>
         <title>Web3 Operations Console — Sepolia Demo</title>
+         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <meta
           name="description"
           content="A read-only Sepolia testnet console for inspecting equal-split smart contracts: verified contracts, live balances, lifecycle state and linked on-chain evidence. Testnet only — no real funds."
