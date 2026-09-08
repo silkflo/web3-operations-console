@@ -18,8 +18,9 @@
     "indexer:watch": "node src/indexer/cli.js watch",
     "indexer:status": "node src/indexer/cli.js status",
     "indexer:rebuild": "node src/indexer/cli.js rebuild",
-    "test": "node --test --test-concurrency=1 test/guard.test.js test/boundaries.test.js test/fastify-compat.test.js test/indexer.test.js test/api.test.js",
+    "test": "node --test --test-concurrency=1 test/guard.test.js test/boundaries.test.js test/redact.test.js test/fastify-compat.test.js test/indexer.test.js test/api.test.js test/resilience.test.js",
     "test:boundaries": "node --test test/boundaries.test.js",
+    "test:resilience": "node --test test/redact.test.js test/resilience.test.js",
     "db:test:migrate": "node scripts/db-test.js migrate",
     "db:test:reset": "node scripts/db-test.js reset",
     "db:test:status": "node scripts/db-test.js status"

@@ -23,6 +23,13 @@
 //   up as enterprise-grade.
 
 const { LIFECYCLE_EVENTS } = require("./projection");
+const { sleep, backoffDelay } = require("../util/timeout");
+const {
+  describeRpcError,
+  isRetryableRpcError,
+  isRangeTooLargeError,
+  redactText,
+} = require("../util/redact");
 
 const lower = (value) => String(value).toLowerCase();
 
@@ -40,9 +47,42 @@ const chunkRanges = (fromBlock, toBlock, size) => {
   return ranges;
 };
 
-const createIndexer = ({ prisma, reader, config, logger = console }) => {
+const createIndexer = ({
+  prisma,
+  reader,
+  config,
+  logger = console,
+  // Injected so the backoff tests are deterministic and instant.
+  wait = sleep,
+  random = Math.random,
+}) => {
   const { chainId, factoryAddress, deploymentBlock } = config;
-  const { confirmations, chunkSize, reorgDepth } = config.indexer;
+  const {
+    confirmations,
+    chunkSize,
+    reorgDepth,
+    minChunkSize = chunkSize,
+    chunkDelayMs = 0,
+    maxBlocksPerPass = 0,
+    maxAttempts = 1,
+    backoffMs = 2000,
+    backoffMaxMs = 300000,
+  } = config.indexer;
+
+  /**
+   * Largest range this provider has accepted so far.
+   *
+   * Public RPCs disagree about the maximum eth_getLogs span — Alchemy is
+   * generous, some public endpoints cap at a few hundred blocks or at a result
+   * count — and none of them advertise it. So the configured chunk size is an
+   * upper bound to try, not a promise: a range refusal halves it, and sustained
+   * success grows it back. The alternative, hard-coding a tiny chunk, is what
+   * turned a 12,500-block backlog into thousands of sequential requests.
+   */
+  let currentChunkSize = chunkSize;
+
+  /** One pass at a time. A second caller joins the pass already running. */
+  let inflightPass = null;
 
   /** Ensures the Factory row exists and returns it. */
   const ensureFactory = async () => {
@@ -147,7 +187,13 @@ const createIndexer = ({ prisma, reader, config, logger = console }) => {
 
     const scope = await factoryScope(factory.id);
 
-       await prisma.$transaction(async (tx) => {
+    // Read the replacement block hash BEFORE opening the transaction. An RPC
+    // call inside one holds a database transaction open for the length of a
+    // network round-trip, and a slow provider would then hit Prisma's
+    // transaction timeout rather than the reader's.
+    const rewindBlock = await reader.getBlock(rewindTo);
+
+    await prisma.$transaction(async (tx) => {
       await tx.chainEvent.deleteMany({
         where: { ...scope, blockNumber: { gt: rewindTo } },
       });
@@ -161,8 +207,6 @@ const createIndexer = ({ prisma, reader, config, logger = console }) => {
           createdAtBlock: { gt: rewindTo },
         },
       });
-
-      const rewindBlock = await reader.getBlock(rewindTo);
 
       await tx.indexerCheckpoint.update({
         where: { id: checkpoint.id },
@@ -343,10 +387,71 @@ const createIndexer = ({ prisma, reader, config, logger = console }) => {
   };
 
   /**
-   * Runs one indexing pass up to the confirmed head.
-   * @returns {Promise<{from:number,to:number,events:number,reorg:boolean,upToDate:boolean}>}
+   * Collects and persists one block range.
+   *
+   * Safe to retry in full: the split upsert is a no-op on an existing row, the
+   * unique key on (chainId, transactionHash, logIndex) absorbs replayed logs,
+   * and the transaction either commits everything or nothing.
    */
-  const sync = async () => {
+  const processRange = async (factory, checkpoint, range) => {
+    // Factory logs first: they reveal splits whose logs we then need.
+    const factoryLogs = await reader.fetchFactoryLogs(
+      lower(factoryAddress),
+      range.fromBlock,
+      range.toBlock
+    );
+
+    await upsertSplitsFromLogs(factory, factoryLogs);
+
+    const splits = await prisma.split.findMany({
+      where: { factoryId: factory.id },
+    });
+
+    const splitIdByAddress = new Map(
+      splits.map((split) => [split.address, split.id])
+    );
+
+    let splitLogs = [];
+
+    for (const split of splits) {
+      const logs = await reader.fetchSplitLogs(
+        split.address,
+        range.fromBlock,
+        range.toBlock
+      );
+      splitLogs = splitLogs.concat(logs);
+    }
+
+    const rows = [...factoryLogs, ...splitLogs];
+    const endBlock = await reader.getBlock(range.toBlock);
+
+    // Events and cursor advance together: a crash between them is impossible.
+    return prisma.$transaction(async (tx) => {
+      const count = await persistEvents(tx, rows, splitIdByAddress);
+
+      await tx.indexerCheckpoint.update({
+        where: { id: checkpoint.id },
+        data: {
+          lastIndexedBlock: range.toBlock,
+          lastIndexedHash: endBlock ? endBlock.hash : null,
+          eventsIndexed: { increment: count },
+        },
+      });
+
+      return count;
+    });
+  };
+
+  /**
+   * Runs one indexing pass up to the confirmed head.
+   *
+   * The result carries `caughtUp` so a poll loop can distinguish "nothing left
+   * to do, wait a minute" from "still behind, come back shortly".
+   *
+   * @returns {Promise<{from:number,to:number,events:number,reorg:boolean,
+   *                    upToDate:boolean,caughtUp:boolean,chunkSize:number}>}
+   */
+  const runSyncPass = async () => {
     const factory = await ensureFactory();
     let checkpoint = await ensureCheckpoint(factory.id);
 
@@ -378,64 +483,111 @@ const createIndexer = ({ prisma, reader, config, logger = console }) => {
         events: 0,
         reorg,
         upToDate: true,
+        caughtUp: true,
+        chunkSize: currentChunkSize,
       };
     }
 
     let totalWritten = 0;
+    let cursor = fromBlock;
+    let blocksThisPass = 0;
+    let consecutiveOk = 0;
 
-    for (const range of chunkRanges(fromBlock, confirmedHead, chunkSize)) {
-      // Factory logs first: they reveal splits whose logs we then need.
-      const factoryLogs = await reader.fetchFactoryLogs(
-        lower(factoryAddress),
-        range.fromBlock,
-        range.toBlock
-      );
+    const budgetSpent = () =>
+      maxBlocksPerPass > 0 && blocksThisPass >= maxBlocksPerPass;
 
-      await upsertSplitsFromLogs(factory, factoryLogs);
+    while (cursor <= confirmedHead && !budgetSpent()) {
+      const remaining =
+        maxBlocksPerPass > 0
+          ? maxBlocksPerPass - blocksThisPass
+          : Number.MAX_SAFE_INTEGER;
 
-      const splits = await prisma.split.findMany({
-        where: { factoryId: factory.id },
-      });
+      const size = Math.max(1, Math.min(currentChunkSize, remaining));
+      const range = {
+        fromBlock: cursor,
+        toBlock: Math.min(cursor + size - 1, confirmedHead),
+      };
 
-      const splitIdByAddress = new Map(
-        splits.map((split) => [split.address, split.id])
-      );
+      let written = null;
+      let attempt = 0;
+      let shrank = false;
 
-      let splitLogs = [];
+      while (written === null && !shrank) {
+        try {
+          written = await processRange(factory, checkpoint, range);
+        } catch (error) {
+          const described = describeRpcError(error);
 
-      for (const split of splits) {
-        const logs = await reader.fetchSplitLogs(
-          split.address,
-          range.fromBlock,
-          range.toBlock
-        );
-        splitLogs = splitLogs.concat(logs);
+          // A provider refusing the SIZE of a range is not failing, it is
+          // telling us its limit. Halve and re-cut the range immediately --
+          // no backoff, because nothing is overloaded.
+          if (isRangeTooLargeError(error) && currentChunkSize > minChunkSize) {
+            currentChunkSize = Math.max(
+              minChunkSize,
+              Math.floor(currentChunkSize / 2)
+            );
+            consecutiveOk = 0;
+            shrank = true;
+
+            logger.warn(
+              `[indexer] provider refused a ${size}-block range ` +
+                `(${described.category}); retrying with ${currentChunkSize}`
+            );
+
+            break;
+          }
+
+          attempt += 1;
+
+          if (attempt >= maxAttempts || !isRetryableRpcError(error)) {
+            throw error;
+          }
+
+          // Bounded, jittered, and it stops. Retrying a rate limit immediately
+          // is how a 429 becomes a retry storm.
+          const delay = backoffDelay(attempt, {
+            baseMs: backoffMs,
+            maxMs: backoffMaxMs,
+            random,
+          });
+
+          logger.warn(
+            `[indexer] blocks ${range.fromBlock}-${range.toBlock} failed ` +
+              `(${described.category}${
+                described.status ? ` ${described.status}` : ""
+              }${described.host ? ` from ${described.host}` : ""}); ` +
+              `attempt ${attempt}/${maxAttempts}, retrying in ${delay}ms`
+          );
+
+          await wait(delay);
+        }
       }
 
-      const rows = [...factoryLogs, ...splitLogs];
-      const endBlock = await reader.getBlock(range.toBlock);
-
-      // Events and cursor advance together: a crash between them is impossible.
-      const written = await prisma.$transaction(async (tx) => {
-        const count = await persistEvents(tx, rows, splitIdByAddress);
-
-        await tx.indexerCheckpoint.update({
-          where: { id: checkpoint.id },
-          data: {
-            lastIndexedBlock: range.toBlock,
-            lastIndexedHash: endBlock ? endBlock.hash : null,
-            eventsIndexed: { increment: count },
-          },
-        });
-
-        return count;
-      });
+      if (shrank) {
+        continue;
+      }
 
       totalWritten += written;
+      blocksThisPass += range.toBlock - range.fromBlock + 1;
+      cursor = range.toBlock + 1;
+      consecutiveOk += 1;
+
+      // Grow back towards the configured maximum once the provider has proved
+      // it can take the current size, so one transient refusal does not pin the
+      // indexer at the minimum for the rest of a long catch-up.
+      if (consecutiveOk >= 3 && currentChunkSize < chunkSize) {
+        currentChunkSize = Math.min(chunkSize, currentChunkSize * 2);
+        consecutiveOk = 0;
+      }
 
       logger.info(
         `[indexer] blocks ${range.fromBlock}-${range.toBlock}: ${written} new event(s)`
       );
+
+      // Leave the shared RPC some capacity for the API between chunks.
+      if (cursor <= confirmedHead && !budgetSpent() && chunkDelayMs > 0) {
+        await wait(chunkDelayMs);
+      }
     }
 
     await rebuildProjections(factory.id);
@@ -447,11 +599,33 @@ const createIndexer = ({ prisma, reader, config, logger = console }) => {
 
     return {
       from: fromBlock,
-      to: confirmedHead,
+      to: cursor - 1,
       events: totalWritten,
       reorg,
       upToDate: false,
+      caughtUp: cursor > confirmedHead,
+      chunkSize: currentChunkSize,
     };
+  };
+
+  /**
+   * Public entry point.
+   *
+   * Overlapping passes would double the RPC load exactly when the provider is
+   * already struggling, and two passes writing the same checkpoint is a race
+   * worth not having. A concurrent caller joins the running pass instead.
+   */
+  const sync = async () => {
+    if (inflightPass) {
+      const result = await inflightPass;
+      return { ...result, coalesced: true };
+    }
+
+    inflightPass = runSyncPass().finally(() => {
+      inflightPass = null;
+    });
+
+    return inflightPass;
   };
 
   /** Reports cursor and health without touching the chain beyond the head. */
@@ -527,9 +701,18 @@ const createIndexer = ({ prisma, reader, config, logger = console }) => {
     const checkpoint = await getCheckpoint(factory.id);
 
     if (checkpoint) {
+      const described = describeRpcError(error);
+
+      // `lastError` is printed by indexer:status and is durable. An
+      // unredacted ethers message would put the RPC credential in PostgreSQL.
       await prisma.indexerCheckpoint.update({
         where: { id: checkpoint.id },
-        data: { lastError: String(error.message || error).slice(0, 1000) },
+        data: {
+          lastError: redactText(
+            `[${described.category}] ${described.message}` +
+              (described.host ? ` (provider ${described.host})` : "")
+          ).slice(0, 1000),
+        },
       });
     }
   };
@@ -542,6 +725,9 @@ const createIndexer = ({ prisma, reader, config, logger = console }) => {
     rebuildProjections,
     ensureFactory,
     chunkRanges,
+    /** Current adaptive range size. Observability and tests only. */
+    currentChunkSize: () => currentChunkSize,
+    isRunning: () => Boolean(inflightPass),
   };
 };
 

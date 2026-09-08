@@ -63,6 +63,9 @@ jobs:
       - name: Migrate isolated test database
         run: npm --prefix backend run db:test:migrate
 
+      - name: Test frontend libraries
+        run: npm test
+
       - name: Test backend
         run: npm --prefix backend test
 

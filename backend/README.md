@@ -73,12 +73,14 @@ NEXT_PUBLIC_WEB3_API_URL=http://127.0.0.1:4000 npm run build && npm start
 | `npm run indexer:rebuild -- --confirm` | Wipe and re-index this factory |
 | `npm run api:dev` | Start the API |
 | `npm test` | Full backend suite |
+| `npm run test:resilience` | Redaction and RPC-failure suites only (no database needed for redaction) |
 
 ## Endpoints
 
 | Route | Returns |
 |---|---|
-| `GET /health` | Database, indexed vs chain block, lag, last sync, staleness |
+| `GET /health` | Database, RPC, indexed vs chain block, lag, last sync, staleness, whether cached or stale data is being served |
+| `GET /api/v1/web3/dashboard` | Everything the console homepage renders, from one snapshot |
 | `GET /api/v1/web3/summary` | Factory, total held, participation breakdown |
 | `GET /api/v1/web3/splits` | Every split with lifecycle state and evidence |
 | `GET /api/v1/web3/splits/:address` | One split |
@@ -88,11 +90,40 @@ NEXT_PUBLIC_WEB3_API_URL=http://127.0.0.1:4000 npm run build && npm start
 
 All GET. No write routes, no signer, no key material.
 
+## Resilience
+
+The chain is remote, metered and occasionally unavailable, so none of it is
+treated as reliable.
+
+- **Bounded latency.** Every RPC call has a hard timeout (`RPC_TIMEOUT_MS`, and
+  `WEB3_INDEXER_RPC_TIMEOUT_MS` for the indexer). Ethers' defaults — a 300s
+  request timeout and twelve retries on a 429 — are overridden in
+  `src/chain/provider.js`; retrying is the application's decision, not the
+  transport's.
+- **One snapshot, shared.** `src/api/snapshot.js` caches the dashboard snapshot
+  for `API_SNAPSHOT_TTL_SECONDS` and coalesces concurrent callers into a single
+  in-flight refresh, so `/splits`, `/summary` and `/dashboard` arriving together
+  cost one set of chain reads rather than three.
+- **Last known good.** A failed refresh serves the previous snapshot for up to
+  `API_SNAPSHOT_MAX_STALE_SECONDS`, labelled `stale`. A failed *live read*
+  falls back to the index and is labelled `degraded`. Neither is ever presented
+  as a current live-chain value: every response carries a `freshness` block.
+- **Provider pressure is respected.** After an RPC failure, the provider is left
+  alone for `API_RPC_ERROR_COOLDOWN_SECONDS`; the indexer backs off with bounded,
+  jittered exponential delays and halves its `eth_getLogs` range when a provider
+  refuses it.
+- **No credential in any log.** `src/util/redact.js` sanitizes URLs, error
+  objects and nested provider metadata; it is installed as the pino `err`
+  serializer, so the safety net is under every call site.
+  `test/redact.test.js` proves it against a real ethers 429.
+
+`.env.example` documents every option with its default.
+
 ## Security
 
 Participant addresses are stored in the raw index (needed to count outstanding
 claims) but filtered at the API boundary by an allow-list of public argument
 fields. No endpoint returns one — enforced by `test/api.test.js`.
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for the production boundary between browser,
-Vercel, VPS and database.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the production boundary between the
+browser, the VPS and the database.

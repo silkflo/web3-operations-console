@@ -15,6 +15,8 @@ const rateLimit = require("@fastify/rate-limit");
 const sensible = require("@fastify/sensible");
 
 const { registerRoutes } = require("./routes");
+const { createSnapshotService } = require("./snapshot");
+const { errorSerializer } = require("../util/redact");
 
 /** Serializes BigInt safely: JSON.stringify throws on it by default. */
 const bigintSafe = (value) =>
@@ -24,21 +26,35 @@ const bigintSafe = (value) =>
     )
   );
 
+/**
+ * Pino options for the API logger.
+ *
+ * Exported so the secret-leak regression test configures a logger exactly the
+ * way the running service does, rather than a lookalike that could drift.
+ */
+const buildLoggerOptions = (config) => ({
+  level: config.api.logLevel,
+  // Structured logs; never log a full env or connection string.
+  redact: {
+    paths: ["req.headers.authorization", "req.headers.cookie"],
+    remove: true,
+  },
+  serializers: {
+    // Pino's default would log err.message and err.stack verbatim. Ethers puts
+    // the credential-bearing RPC URL in both, so one 429 would write the API
+    // key into the journal. This is the safety net under every explicit call
+    // site: anything logged as `err` is redacted whether or not the caller
+    // remembered to redact it.
+    err: errorSerializer,
+    error: errorSerializer,
+  },
+});
+
 const buildApp = async ({ runtime, logger = true } = {}) => {
   const { config } = runtime;
 
   const app = Fastify({
-    logger:
-      logger === false
-        ? false
-        : {
-            level: config.api.logLevel,
-            // Structured logs; never log a full env or connection string.
-            redact: {
-              paths: ["req.headers.authorization", "req.headers.cookie"],
-              remove: true,
-            },
-          },
+    logger: logger === false ? false : buildLoggerOptions(config),
     // Correlates every log line and error response with one request.
     genReqId: () =>
       `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`,
@@ -79,6 +95,16 @@ const buildApp = async ({ runtime, logger = true } = {}) => {
   app.decorate("runtime", runtime);
   app.decorate("bigintSafe", bigintSafe);
 
+  // One snapshot cache per app instance. Built here rather than in
+  // createRuntime so tests that override the reader get a matching cache.
+  app.decorate(
+    "snapshots",
+    createSnapshotService({
+      runtime,
+      logger: logger === false ? { warn() {}, info() {}, error() {} } : app.log,
+    })
+  );
+
   // One error shape for everything. The detail goes to the log, not the client.
   app.setErrorHandler((error, request, reply) => {
     const status = error.statusCode && error.statusCode >= 400 ? error.statusCode : 500;
@@ -117,4 +143,4 @@ const buildApp = async ({ runtime, logger = true } = {}) => {
   return app;
 };
 
-module.exports = { buildApp, bigintSafe };
+module.exports = { buildApp, bigintSafe, buildLoggerOptions };

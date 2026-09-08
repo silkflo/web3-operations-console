@@ -18,10 +18,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test": "node --test --test-concurrency=1 test/dashboard-poller.test.js test/web3-api-client.test.js",
     "test:contracts": "npm --prefix ethereum-v3 test",
     "test:demo": "npm --prefix ethereum-v3 run test:demo",
     "test:backend": "npm --prefix backend test",
-    "verify": "npm run build && npm --prefix backend test && npm --prefix ethereum-v3 test"
+    "verify": "npm test && npm run build && npm --prefix backend test && npm --prefix ethereum-v3 test"
   },
   "dependencies": {
     "next": "^16.3.3",

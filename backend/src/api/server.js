@@ -7,6 +7,7 @@
 const { buildApp } = require("./app");
 const { createRuntime } = require("../runtime");
 const { disconnectPrisma } = require("../db/client");
+const { describeRpcError } = require("../util/redact");
 
 async function main() {
   const runtime = createRuntime({ requireRpc: false });
@@ -30,7 +31,9 @@ async function main() {
 }
 
 main().catch(async (error) => {
-  console.error(error.message || error);
+  // Startup failures print before the logger exists, so redact here too: a bad
+  // RPC URL must not be echoed to the console with its credential attached.
+  console.error(describeRpcError(error).message);
   await disconnectPrisma();
   process.exitCode = 1;
 });

@@ -137,23 +137,79 @@ test("the API client reads only its public build-injected API URL", () => {
 
 // ---------------------------------------------------- no write capability ----
 
+/** Signing capability, in every form ethers offers it. */
+const SIGNING_CAPABILITY = [
+  /\bnew (?:ethers\.)?Wallet\b/,
+  /\bWallet\.(?:fromPhrase|fromEncryptedJson|fromEncryptedJsonSync|createRandom)\b/,
+  /\bHDNodeWallet\b/,
+  /getSigner\(/,
+  /sendTransaction\(/,
+  /\bsign(?:Transaction|Message|TypedData)\(/,
+  /\.connect\(wallet/,
+];
+
+/**
+ * Key material being HELD, rather than merely named.
+ *
+ * These two checks were `/privateKey/i` and `/mnemonic/i` — a bare mention of
+ * either word anywhere in a file. That flagged src/util/redact.js, whose entire
+ * job is to recognise those property names so their values never reach a log; a
+ * deny-list has to name what it denies. What actually matters is whether the
+ * backend reads such a value or assigns one, so that is what is tested now.
+ * Every capability check above is unchanged, and four more were added.
+ */
+const KEY_MATERIAL = [
+  /\b(?:privateKey|private_key|mnemonic)\s*[:=][^=]/i,
+  /process\.env\.[A-Za-z0-9_]*(?:PRIVATE_KEY|MNEMONIC)\b/,
+  /\bmnemonic\s*\(/i,
+];
+
+const KEY_PATTERNS = [...SIGNING_CAPABILITY, ...KEY_MATERIAL];
+
 test("no signer, wallet or transaction call exists in backend code", () => {
   const offenders = walk(path.join(BACKEND, "src")).filter((file) => {
     const source = readCode(file);
-    return (
-      /\bnew Wallet\b/.test(source) ||
-      /getSigner\(/.test(source) ||
-      /sendTransaction\(/.test(source) ||
-      /\.connect\(wallet/.test(source) ||
-      /privateKey/i.test(source) ||
-      /mnemonic/i.test(source)
-    );
+    return KEY_PATTERNS.some((pattern) => pattern.test(source));
   });
 
   assert.deepEqual(
     offenders.map((f) => path.relative(REPO, f)),
     [],
     "the backend is read-only and holds no key material"
+  );
+});
+
+test("the key-material check still catches a real leak", () => {
+  // Guards the guard. The patterns above are only worth having if they still
+  // fire on exactly the code they exist to forbid.
+  const MUST_BE_CAUGHT = [
+    'const wallet = new Wallet(process.env.DEPLOYER_PRIVATE_KEY);',
+    'const w = new ethers.Wallet(key);',
+    'const signer = provider.getSigner();',
+    'const w = Wallet.fromPhrase(process.env.DEMO_MNEMONIC);',
+    'const w = HDNodeWallet.createRandom();',
+    'await contract.connect(wallet).fund();',
+    'const privateKey = "0xabc";',
+    'const cfg = { mnemonic: "test test test" };',
+    'await signer.sendTransaction(tx);',
+    'await signer.signMessage("hi");',
+    'await signer.signTypedData(domain, types, value);',
+  ];
+
+  MUST_BE_CAUGHT.forEach((snippet) => {
+    assert.ok(
+      KEY_PATTERNS.some((pattern) => pattern.test(snippet)),
+      `key-material check missed: ${snippet}`
+    );
+  });
+
+  // And it must NOT fire on a redaction deny-list that only names the terms.
+  const denyList =
+    'const SENSITIVE = ["privatekey", "mnemonic", "password", "apikey"];';
+
+  assert.ok(
+    !KEY_PATTERNS.some((pattern) => pattern.test(denyList)),
+    "naming a secret in a deny-list is not the same as holding one"
   );
 });
 
@@ -247,7 +303,10 @@ test("backend .env is gitignored", () => {
   assert.match(ignore, /^\.env$/m);
 });
 
-test("the deployment doc forbids database and RPC secrets in Vercel", () => {
+test("the deployment doc forbids database and RPC secrets in the frontend build", () => {
+  // Named the frontend build rather than a hosting provider: the frontend runs
+  // on the same VPS as the API, and the rule is about what gets compiled into
+  // the browser bundle, not about who hosts it.
   const docPath = path.join(BACKEND, "DEPLOYMENT.md");
 
   assert.ok(fs.existsSync(docPath), "DEPLOYMENT.md must exist");
@@ -257,9 +316,34 @@ test("the deployment doc forbids database and RPC secrets in Vercel", () => {
   assert.match(doc, /NEXT_PUBLIC_WEB3_API_URL/);
   assert.match(
     doc,
-    /not\*{0,2}\s+configure[\s\S]{0,80}DATABASE_URL/i,
-    "must tell the reader to keep DATABASE_URL out of Vercel"
+    /not\*{0,2}\s+configure[\s\S]{0,120}DATABASE_URL/i,
+    "must tell the reader to keep DATABASE_URL out of the frontend build"
+  );
+  assert.match(
+    doc,
+    /SEPOLIA_RPC_URL/,
+    "must name the RPC secret as something the frontend never receives"
   );
   assert.match(doc, /Bind to localhost|127\.0\.0\.1:5432/, "database must not be public");
   assert.match(doc, /never signs|does not sign|never sign/i, "API must be stated read-only");
+});
+
+test("the deployment doc describes the deployment that actually exists", () => {
+  // Wrong paths in a runbook are worse than no runbook: they get pasted into a
+  // root shell. This pins the two facts that were wrong.
+  const doc = read(path.join(BACKEND, "DEPLOYMENT.md"));
+
+  assert.match(
+    doc,
+    /\/home\/floadmin\/apps\/web3-operations-console-public/,
+    "must use the real production path"
+  );
+  assert.ok(
+    !/\/srv\/flo-portfolio/.test(doc),
+    "the invented /srv path must not appear"
+  );
+  assert.ok(
+    !/vercel/i.test(doc),
+    "the frontend is on the VPS; no hosting-platform instructions"
+  );
 });

@@ -24,6 +24,59 @@ const LIFECYCLE_EVENTS = [
   "Withdrawal",
 ];
 
+/**
+ * Reconstructs a split's CURRENT state from its indexed event history.
+ *
+ * Used only when no contract read is available. It replaces the previous
+ * behaviour, which substituted zeroes for every current-state field and then
+ * published them under "ContractRead" evidence — inventing a balance of 0 ETH
+ * for a funded contract and citing a read that never happened.
+ *
+ * The reconstruction is exact for EthSplit v3, and it is exact because of what
+ * the contract does NOT have: there is no `receive()` and no `fallback()`, so
+ * `fund()` is the only way ETH enters, and every path that moves ETH or changes
+ * participation emits an event.
+ *
+ *   round            1 at construction, incremented by each finalization
+ *   participantCount joins in the current round (finalization clears the list)
+ *   roundPool        total funded minus total distributed (the division
+ *                    remainder stays in the pool and carries forward)
+ *   totalClaimable   total distributed minus total withdrawn
+ *   balance          total funded minus total withdrawn
+ *
+ * The one thing it cannot see is ETH forced in by `selfdestruct`, which no
+ * event records. That would make the derived balance an understatement, which
+ * is why these values are labelled "derived" and never presented as a read.
+ */
+const deriveCurrentStateFromEvents = (rows) => {
+  const sum = (eventName, key) =>
+    rows
+      .filter((row) => row.eventName === eventName)
+      .reduce((total, row) => total + BigInt(row.args[key] || 0), 0n);
+
+  const finalizations = rows.filter(
+    (row) => row.eventName === "DistributionFinalized"
+  );
+
+  const round = 1 + finalizations.length;
+
+  const participantCount = rows.filter(
+    (row) => row.eventName === "ParticipantJoined" && Number(row.round) === round
+  ).length;
+
+  const fundedTotal = sum("Funded", "amount");
+  const distributedTotal = sum("DistributionFinalized", "totalDistributed");
+  const withdrawnTotal = sum("Withdrawal", "amount");
+
+  return {
+    round,
+    participantCount,
+    roundPoolWei: fundedTotal - distributedTotal,
+    totalClaimableWei: distributedTotal - withdrawnTotal,
+    balanceWei: fundedTotal - withdrawnTotal,
+  };
+};
+
 /** Re-shapes a persisted ChainEvent row into the model's decoded-log shape. */
 const toModelLog = (row) => ({
   eventName: row.eventName,
@@ -40,6 +93,9 @@ const toModelLog = (row) => ({
  * @param {Object} input.prisma
  * @param {Object} input.config
  * @param {Map<string,Object>} input.liveState  address -> current contract read.
+ *   An entry may carry `{ source, readAtBlock }` describing whether the read
+ *   happened now ("live") or earlier ("last-known-good"). A missing entry means
+ *   no read is available and current state is reconstructed from events.
  * @param {number} input.generatedAtBlock
  * @param {boolean} [input.historyComplete=true]
  */
@@ -95,24 +151,24 @@ const buildSnapshotFromIndex = async ({
       },
     });
 
-    const live = liveState.get(split.address) || null;
+    const entry = liveState.get(split.address) || null;
 
-    // Without a live read the split still projects from history; current-state
-    // fields fall back to the last known values rather than inventing zeroes.
-    const lastRound = rows.reduce(
-      (max, row) => (row.round !== null && row.round > max ? row.round : max),
-      1
-    );
+    // An entry may be a plain read (from the chain reader) or a wrapper
+    // carrying provenance. Both are accepted so the projection stays usable
+    // from tests and from the CLI without a snapshot service.
+    const live = entry && entry.reads ? entry.reads : entry;
+    const source = entry
+      ? (entry.source || "live")
+      : "derived";
+    const readAtBlock = entry ? entry.readAtBlock || null : null;
 
+    // No read available: reconstruct current state from what the chain
+    // actually told us, and label it. Never substitute zeroes.
     const reads = live || {
       address: split.address,
       title: split.title,
       version: config.factoryVersion || "3.0.0",
-      round: lastRound,
-      participantCount: 0,
-      balanceWei: 0n,
-      roundPoolWei: 0n,
-      totalClaimableWei: 0n,
+      ...deriveCurrentStateFromEvents(rows),
     };
 
     splits.push(
@@ -121,7 +177,12 @@ const buildSnapshotFromIndex = async ({
         events,
         creation: creationRow ? toModelLog(creationRow) : null,
         atBlock: generatedAtBlock,
-        historyComplete: historyComplete && Boolean(live),
+        // History is complete whenever the index covers it. It is unrelated to
+        // whether a live read succeeded — conflating the two made an RPC blip
+        // look like missing history.
+        historyComplete,
+        currentStateSource: source,
+        currentStateAtBlock: readAtBlock,
       })
     );
   }
@@ -181,6 +242,7 @@ const summarizeParticipation = (snapshot) => {
 
 module.exports = {
   LIFECYCLE_EVENTS,
+  deriveCurrentStateFromEvents,
   buildSnapshotFromIndex,
   summarizeParticipation,
   toModelLog,

@@ -42,6 +42,9 @@ Sepolia                Indexer                PostgreSQL           API          
 - **The browser holds no chain credential.** It makes one kind of request: HTTPS
   GETs to the API base in `NEXT_PUBLIC_WEB3_API_URL`. It imports no `ethers`, no
   Prisma client and no database driver, and it never talks to an RPC node.
+- **One request per refresh, on a conservative interval.** The page reads
+  `/api/v1/web3/dashboard`, which answers from a shared server-side snapshot
+  cache. Refreshes never overlap and pause while the tab is hidden.
 - Participant addresses are used server-side to count outstanding claims and are
   never included in an API response or in the generated frontend config.
 
@@ -145,11 +148,12 @@ VPS deployment.
 
 ## Tests
 
-| Command                  | Covers                                                                 |
-| ------------------------ | ---------------------------------------------------------------------- |
-| `npm run test:contracts` | Solidity unit, security (reentrancy), fuzz and invariant suites        |
-| `npm run test:demo`      | Manifest schema, scenarios, workflow, console copy, intelligence rules |
-| `npm run test:backend`   | Guard, architecture boundaries, Fastify compatibility, indexer, API    |
+| Command                  | Covers                                                                                    |
+| ------------------------ | ----------------------------------------------------------------------------------------- |
+| `npm test`               | Frontend libraries: refresh lifecycle, API client, freshness reporting                     |
+| `npm run test:contracts` | Solidity unit, security (reentrancy), fuzz and invariant suites                            |
+| `npm run test:demo`      | Manifest schema, scenarios, workflow, console copy, intelligence rules                     |
+| `npm run test:backend`   | Guard, boundaries, secret redaction, Fastify compatibility, indexer, API, RPC resilience    |
 
 The backend suite needs the local PostgreSQL from `backend/docker-compose.yml`.
 Suites that need a database skip themselves, with a stated reason, when
@@ -182,6 +186,11 @@ migration or reset whose target is not an explicitly configured, local,
 
 - Sepolia only. There is no mainnet deployment and no plan for one.
 - No professional external audit.
+- The RPC endpoint is a shared public one and can be slow, rate-limited or
+  unavailable. When it is, the console keeps serving the last known good
+  snapshot or indexed history and says so; it does not present cached figures
+  as current live-chain values. See
+  [`backend/DEPLOYMENT.md`](backend/DEPLOYMENT.md) for the degradation matrix.
 - The index is eventually consistent: the indexer waits for confirmations, so
   the console shows an explicit freshness state and marks data stale when the
   indexer falls behind the chain head.

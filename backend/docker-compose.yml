@@ -4,7 +4,7 @@
 #
 # The port is bound to 127.0.0.1 on purpose: the database must never be
 # reachable from outside the developer's machine, and in production it is bound
-# to localhost or a private Docker network on the VPS. Vercel and the browser
+# to localhost or a private Docker network on the VPS. The frontend and browser
 # never talk to it.
 services:
   postgres:

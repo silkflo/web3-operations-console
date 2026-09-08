@@ -157,10 +157,18 @@ const createStubChain = ({ head = 1100, fork = "a" } = {}) => {
         blockHash: hashFor(log.blockNumber, state.fork),
       }));
 
-  const calls = { fetchFactoryLogs: 0, fetchSplitLogs: 0, getBlock: 0 };
+  // Counted so a test can assert how much RPC traffic a request actually costs.
+  const calls = {
+    fetchFactoryLogs: 0,
+    fetchSplitLogs: 0,
+    getBlock: 0,
+    getBlockNumber: 0,
+    readSplitState: 0,
+  };
 
   const reader = {
     async getBlockNumber() {
+      calls.getBlockNumber += 1;
       return state.head;
     },
 
@@ -189,6 +197,8 @@ const createStubChain = ({ head = 1100, fork = "a" } = {}) => {
     },
 
     async readSplitState(address) {
+      calls.readSplitState += 1;
+
       const isA = address.toLowerCase() === SPLIT_A;
 
       return {
@@ -243,10 +253,24 @@ const stubConfig = (overrides = {}) => ({
   factoryAddress: FACTORY,
   deploymentBlock: DEPLOY_BLOCK,
   factoryVersion: "3.0.0",
+  rpc: {
+    timeoutMs: 1000,
+    maxAttempts: 1,
+  },
   indexer: {
     confirmations: 6,
     chunkSize: 50,
+    minChunkSize: 5,
     pollMs: 15000,
+    catchUpPollMs: 100,
+    // Tests must not sit through real delays; the backoff itself is asserted
+    // by injecting a `wait` spy rather than by waiting.
+    chunkDelayMs: 0,
+    maxBlocksPerPass: 0,
+    rpcTimeoutMs: 1000,
+    maxAttempts: 3,
+    backoffMs: 10,
+    backoffMaxMs: 100,
     reorgDepth: 24,
   },
   api: {
@@ -256,6 +280,11 @@ const stubConfig = (overrides = {}) => ({
     rateLimitMax: 5,
     rateLimitWindow: "1 minute",
     staleAfterSeconds: 300,
+    snapshotTtlSeconds: 60,
+    snapshotMaxStaleSeconds: 900,
+    chainHeadTtlSeconds: 15,
+    rpcErrorCooldownSeconds: 30,
+    healthTimeoutMs: 2000,
     logLevel: "silent",
   },
   ...overrides,

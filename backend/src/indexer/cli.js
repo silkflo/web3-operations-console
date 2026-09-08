@@ -8,6 +8,8 @@
 
 const { createRuntime } = require("../runtime");
 const { disconnectPrisma } = require("../db/client");
+const { createCancellableSleep, backoffDelay } = require("../util/timeout");
+const { describeRpcError } = require("../util/redact");
 
 const argv = process.argv.slice(2);
 const command = argv[0];
@@ -40,6 +42,17 @@ const printStatus = (status) => {
   }
 };
 
+/**
+ * Reads the indexer RPC timeout before the runtime exists.
+ *
+ * createRuntime needs the value to build the provider, and config is only
+ * assembled inside it, so this small duplication avoids a circular dependency.
+ */
+const buildIndexerTimeout = () => {
+  const { buildConfig } = require("../config");
+  return buildConfig().indexer.rpcTimeoutMs;
+};
+
 const runSync = async (indexer) => {
   const result = await indexer.sync();
 
@@ -69,6 +82,9 @@ async function main() {
   // `status` reads the database only; it must work with no RPC configured.
   const { config, indexer, prisma } = createRuntime({
     requireRpc: command !== "status",
+    // A wide eth_getLogs is legitimately slower than the balance reads the API
+    // makes, so the indexer gets its own, longer bound.
+    rpcTimeoutMs: buildIndexerTimeout(),
   });
 
   if (command === "status") {
@@ -121,32 +137,86 @@ async function main() {
   }
 
   // watch
-  const pollMs = config.indexer.pollMs;
-  console.log(`[indexer] watching, polling every ${pollMs}ms. Ctrl+C to stop.`);
+  const {
+    pollMs,
+    catchUpPollMs,
+    backoffMs,
+    backoffMaxMs,
+    maxBlocksPerPass,
+  } = config.indexer;
+
+  console.log(
+    `[indexer] watching. Poll ${pollMs}ms when current, ${catchUpPollMs}ms ` +
+      `while catching up, up to ` +
+      `${maxBlocksPerPass > 0 ? `${maxBlocksPerPass} blocks` : "no limit"} ` +
+      `per pass. Ctrl+C to stop.`
+  );
 
   let stopping = false;
+  let wakeUp = () => {};
 
-  const shutdown = async (signal) => {
+  const shutdown = (signal) => {
     if (stopping) return;
     stopping = true;
     console.log(`\n[indexer] ${signal} received, finishing current pass...`);
+    // Cut the wait short. With a 60s poll interval, sleeping it out would make
+    // a supervisor stop look like a hang and invite SIGKILL mid-pass.
+    wakeUp();
   };
 
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 
+  let consecutiveFailures = 0;
+
   while (!stopping) {
+    let caughtUp = true;
+
     try {
-      await runSync(indexer);
+      const result = await runSync(indexer);
+      caughtUp = result.caughtUp !== false;
+      consecutiveFailures = 0;
     } catch (error) {
-      // A transient RPC failure must not kill a long-running process.
-      console.error("[indexer] pass failed:", error.message || error);
+      consecutiveFailures += 1;
+
+      // A transient RPC failure must not kill a long-running process — but it
+      // must not be retried at full speed either. Backing off is how the
+      // indexer stops adding to the pressure that caused the failure.
+      const described = describeRpcError(error);
+
+      console.error(
+        `[indexer] pass failed (${described.category}` +
+          `${described.status ? ` ${described.status}` : ""}` +
+          `${described.host ? ` from ${described.host}` : ""}): ` +
+          `${described.message}`
+      );
+
       await indexer.recordError(error);
     }
 
     if (stopping) break;
 
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    const delay =
+      consecutiveFailures > 0
+        ? backoffDelay(consecutiveFailures, {
+            baseMs: backoffMs,
+            maxMs: backoffMaxMs,
+          })
+        : caughtUp
+        ? pollMs
+        : catchUpPollMs;
+
+    if (consecutiveFailures > 0) {
+      console.error(
+        `[indexer] backing off ${delay}ms after ${consecutiveFailures} ` +
+          `consecutive failure(s)`
+      );
+    }
+
+    const nap = createCancellableSleep(delay);
+    wakeUp = nap.cancel;
+    await nap.promise;
+    wakeUp = () => {};
   }
 
   console.log("[indexer] stopped.");
@@ -154,7 +224,7 @@ async function main() {
 
 main()
   .catch((error) => {
-    console.error(error.message || error);
+    console.error(describeRpcError(error).message);
     process.exitCode = 1;
   })
   .finally(async () => {

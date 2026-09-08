@@ -29,9 +29,27 @@ import { QUESTIONS } from "../lib/contract-intelligence/constants";
 import {
   createWeb3ApiClient,
   describeFreshness,
+  describeDataState,
 } from "../lib/web3-api-client";
+import {
+  createDashboardPoller,
+  resolveRefreshIntervalMs,
+} from "../lib/dashboard-poller";
 
-const POLL_INTERVAL_MS = 15000;
+/**
+ * How often the page refreshes itself.
+ *
+ * Was 15 seconds against three endpoints at once. Each refresh cost 3 HTTP
+ * requests and about 45 JSON-RPC operations, so a continuously open, visible
+ * tab made roughly 12 requests and 180 RPC operations a minute — the load that
+ * turned an RPC rate limit into an unreachable dashboard. Nothing on this page
+ * changes that fast: the contracts are a fixed testnet demo. Configurable at
+ * build time with NEXT_PUBLIC_WEB3_REFRESH_MS, clamped to 30s-10min.
+ */
+const POLL_INTERVAL_MS = resolveRefreshIntervalMs();
+
+/** Refresh interval in seconds, for the tile note. */
+const POLL_INTERVAL_LABEL = `${Math.round(POLL_INTERVAL_MS / 1000)}s`;
 
 /** Single API client for the page. No RPC, no Prisma, no database. */
 const api = createWeb3ApiClient();
@@ -121,6 +139,7 @@ const Web3Console = () => {
   const [splitsPayload, setSplitsPayload] = useState(null);
   const [summary, setSummary] = useState(null);
   const [health, setHealth] = useState(null);
+  const [freshness, setFreshness] = useState(null);
   const [loadingSplits, setLoadingSplits] = useState(true);
   const [networkStatus, setNetworkStatus] = useState("checking");
   const [error, setError] = useState(null);
@@ -132,46 +151,72 @@ const Web3Console = () => {
   const [answerError, setAnswerError] = useState(null);
 
   const isMountedRef = useRef(true);
+  const pollerRef = useRef(null);
+  const hasDataRef = useRef(false);
 
   /**
    * Loads the dashboard from the API.
    *
-   * Health is fetched alongside the data so the freshness banner describes the
-   * same moment as the figures beside it. Health and summary failures are
-   * tolerated: the splits response alone is enough to render.
+   * One request. Splits, summary and index health all come from the same
+   * server-side snapshot, so every figure on the page describes one moment
+   * rather than three slightly different ones.
+   *
+   * A failure never blanks the page: whatever was last displayed stays, with
+   * the error shown beside it. An empty dashboard is strictly worse than a
+   * clearly-labelled stale one.
    */
-  const loadDashboardData = useCallback(async ({ silent = false } = {}) => {
-    if (!silent) {
-      setLoadingSplits(true);
-    }
-
+  const loadDashboardData = useCallback(async ({ reason } = {}) => {
     if (!api.isConfigured()) {
       setNetworkStatus("not-configured");
       setError(null);
       setSplitsPayload(null);
       setSummary(null);
       setHealth(null);
+      setFreshness(null);
       setLoadingSplits(false);
       return;
     }
 
+    if (!hasDataRef.current) {
+      setLoadingSplits(true);
+    }
+
     try {
-      const [healthResult, splitsResult, summaryResult] = await Promise.all([
-        api.health().catch(() => null),
-        api.splits(),
-        api.summary().catch(() => null),
-      ]);
+      const payload = await api.dashboard();
 
       if (!isMountedRef.current) {
         return;
       }
 
-      setHealth(healthResult);
-      setSplitsPayload(splitsResult);
-      setSummary(summaryResult);
-      setNetworkStatus("live");
+      hasDataRef.current = true;
 
-      const warnings = splitsResult.warnings || [];
+      setSplitsPayload({
+        generatedAtBlock: payload.generatedAtBlock,
+        splits: payload.splits || [],
+        warnings: payload.warnings || [],
+      });
+
+      // Provenance travels with the figures. Without it the page cannot tell
+      // "read from the chain" from "reconstructed because the chain was
+      // unreachable", and would describe both as live.
+      setFreshness(payload.freshness || null);
+
+      // Optional sections keep their previous values when this refresh could
+      // not produce them, rather than reverting to "Loading...".
+      if (payload.summary) {
+        setSummary(payload.summary);
+      }
+
+      if (payload.health) {
+        setHealth(payload.health);
+      }
+
+      // Connected to the API. Whether the DATA is live is a separate question,
+      // answered by describeDataState below — a 200 response proves only that
+      // the API answered.
+      setNetworkStatus("connected");
+
+      const warnings = payload.warnings || [];
 
       setError(
         warnings.length > 0
@@ -188,10 +233,16 @@ const Web3Console = () => {
         return;
       }
 
-      setNetworkStatus("error");
+      // Keep showing what we have; only the banner changes.
+      setNetworkStatus(hasDataRef.current ? "degraded" : "error");
       setError({
-        title: "Unable to reach the Web3 API",
-        message: loadError.message,
+        title: hasDataRef.current
+          ? "Could not refresh from the Web3 API"
+          : "Unable to reach the Web3 API",
+        message: hasDataRef.current
+          ? `${loadError.message} The figures below are from the last ` +
+            "successful refresh and are not current."
+          : loadError.message,
       });
     } finally {
       if (isMountedRef.current) {
@@ -203,16 +254,30 @@ const Web3Console = () => {
   useEffect(() => {
     isMountedRef.current = true;
 
-    loadDashboardData();
+    // Refreshes never overlap, pause while the tab is hidden and resume when it
+    // is shown again. See lib/dashboard-poller.js.
+    const poller = createDashboardPoller({
+      load: loadDashboardData,
+      intervalMs: POLL_INTERVAL_MS,
+    });
 
-    const interval = setInterval(() => {
-      loadDashboardData({ silent: true });
-    }, POLL_INTERVAL_MS);
+    pollerRef.current = poller;
+    poller.start();
 
     return () => {
       isMountedRef.current = false;
-      clearInterval(interval);
+      poller.stop();
+      pollerRef.current = null;
     };
+  }, [loadDashboardData]);
+
+  /** Manual retry. Joins an in-flight refresh rather than starting a second. */
+  const retry = useCallback(() => {
+    if (pollerRef.current) {
+      return pollerRef.current.refresh({ reason: "manual" });
+    }
+
+    return loadDashboardData({ reason: "manual" });
   }, [loadDashboardData]);
 
   /** Asks one guided question. The analysis runs server-side, on indexed data. */
@@ -251,7 +316,18 @@ const Web3Console = () => {
     : null;
   const latestBlock = health ? health.latestChainBlock : null;
   const indexedBlock = health ? health.latestIndexedBlock : null;
-  const freshness = describeFreshness(health);
+  const indexFreshness = describeFreshness(health);
+
+  // What the figures on this page actually are, decided from the payload's own
+  // provenance rather than from the fact that a request succeeded.
+  const dataState = describeDataState(
+    splitsPayload ? { freshness, health } : null
+  );
+
+  // A refresh that failed outright leaves the previous payload in place, and
+  // that payload may well say "live" — it was, when it was fetched. It is not
+  // live now, so a failed refresh disqualifies the claim regardless.
+  const isLiveData = dataState.isLive && networkStatus !== "degraded";
 
   const isNotConfigured = networkStatus === "not-configured";
 
@@ -261,26 +337,33 @@ const Web3Console = () => {
     ? "Unavailable"
     : "Loading…";
 
-  const statusValue = {
-    live: "Live",
-    checking: "Checking…",
-    "not-configured": "Not configured",
-    error: "Error",
-  }[networkStatus];
+  /**
+   * The tile reports the DATA, not the connection.
+   *
+   * These are two different failures and the page has to separate them: the API
+   * can be perfectly reachable while every contract read behind it is failing.
+   * The value says what the figures are; the note says what the connection is.
+   */
+  const dataStatus = isNotConfigured
+    ? { value: "Not configured", tone: "muted", note: "No API configured" }
+    : networkStatus === "checking"
+    ? { value: "Checking…", tone: "muted", note: "Connecting to read API" }
+    : networkStatus === "error"
+    ? { value: "Error", tone: "bad", note: "Read API unreachable" }
+    : isLiveData
+    ? { value: "Live", tone: "ok", note: "Read API connected · live contract reads" }
+    : {
+        value: dataState.label,
+        tone: dataState.level === "stale" ? "bad" : "warn",
+        note:
+          networkStatus === "degraded"
+            ? "Read API unreachable · showing last successful data"
+            : "Read API connected · live contract reads unavailable",
+      };
 
-  const statusTone = {
-    live: "ok",
-    checking: "muted",
-    "not-configured": "muted",
-    error: "bad",
-  }[networkStatus];
-
-  const statusNote = {
-    live: "Read API connected",
-    checking: "Connecting to read API",
-    "not-configured": "No API configured",
-    error: "Read API unavailable",
-  }[networkStatus];
+  const statusValue = dataStatus.value;
+  const statusTone = dataStatus.tone;
+  const statusNote = dataStatus.note;
 
   return (
     <>
@@ -302,7 +385,10 @@ const Web3Console = () => {
         <section className="hero" aria-labelledby="console-title">
           <ul className="hero-badges" aria-label="Demo characteristics">
             <li className="hero-badge hero-badge-primary">{ENVIRONMENT_LABEL}</li>
-            <li className="hero-badge">Live Blockchain Data</li>
+            {/* Only claimed when the payload says the reads succeeded. */}
+            <li className="hero-badge">
+              {isLiveData ? "Live Blockchain Data" : "Indexed Blockchain Data"}
+            </li>
             <li className="hero-badge">Verified Smart Contracts</li>
             <li className="hero-badge">Human-Controlled Design</li>
           </ul>
@@ -330,7 +416,7 @@ const Web3Console = () => {
             icon="⛓"
             label="Latest block"
             value={latestBlock ? `#${latestBlock.toLocaleString()}` : statusPlaceholder}
-            note={latestBlock ? "Refreshes every 15s" : null}
+            note={latestBlock ? `Refreshes every ${POLL_INTERVAL_LABEL}` : null}
           />
           <StatTile
             icon="◫"
@@ -348,12 +434,15 @@ const Web3Console = () => {
 
         {/* ============ INDEX STATUS ============ */}
         {health && (
-          <div className={`freshness freshness-${freshness.level}`} role="status">
+          <div
+            className={`freshness freshness-${indexFreshness.level}`}
+            role="status"
+          >
             <div className="freshness-main">
               <span className="freshness-dot" aria-hidden="true" />
-              <strong>{freshness.label}</strong>
-              {freshness.detail ? (
-                <span className="freshness-detail">{freshness.detail}</span>
+              <strong>{indexFreshness.label}</strong>
+              {indexFreshness.detail ? (
+                <span className="freshness-detail">{indexFreshness.detail}</span>
               ) : null}
             </div>
             <dl className="freshness-facts">
@@ -406,7 +495,7 @@ const Web3Console = () => {
             <button
               type="button"
               className="btn btn-ghost"
-              onClick={() => loadDashboardData()}
+              onClick={retry}
               disabled={loadingSplits}
             >
               {loadingSplits ? "Retrying…" : "Retry"}
@@ -420,8 +509,11 @@ const Web3Console = () => {
             <div className="panel-head">
               <h2 id="contracts-heading">Split contracts</h2>
               <p className="panel-sub">
-                Read live from Sepolia. Each split divides a funded round equally
-                among that round&rsquo;s participants.
+                {isLiveData
+                  ? "Read live from Sepolia."
+                  : "Live contract reads are unavailable, so the current-state figures below come from the last successful read or are reconstructed from indexed events."}{" "}
+                Each split divides a funded round equally among that
+                round&rsquo;s participants.
               </p>
             </div>
 
@@ -715,7 +807,11 @@ const Web3Console = () => {
             </div>
             <div className="fact">
               <dt>Source</dt>
-              <dd>Indexed events + live contract reads</dd>
+              <dd>
+                {isLiveData
+                  ? "Indexed events + live contract reads"
+                  : "Indexed events (live contract reads unavailable)"}
+              </dd>
             </div>
           </dl>
 
@@ -1373,6 +1469,10 @@ const Web3Console = () => {
 
         .tile-value.tone-bad {
           color: #b91c1c;
+        }
+
+        .tile-value.tone-warn {
+          color: #b45309;
         }
 
         .tile-value.tone-muted {
