@@ -13,6 +13,7 @@ const Fastify = require("fastify");
 const cors = require("@fastify/cors");
 const rateLimit = require("@fastify/rate-limit");
 const sensible = require("@fastify/sensible");
+const helmet = require("@fastify/helmet");
 
 const { registerRoutes } = require("./routes");
 const { createSnapshotService } = require("./snapshot");
@@ -67,6 +68,17 @@ const buildApp = async ({ runtime, logger = true } = {}) => {
   });
 
   await app.register(sensible);
+
+  // Security response headers. Registered before CORS so the CORS plugin stays
+  // the single owner of cross-origin negotiation and helmet only hardens the
+  // response.
+  await app.register(helmet, {
+    // The console frontend reads this API from another subdomain. CORP's
+    // same-origin default is aimed at documents and no-cors subresources;
+    // cross-origin is the correct policy for a public read-only JSON API and
+    // leaves the CORS allow-list above as the only access control.
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  });
 
   await app.register(cors, {
     // Explicit allow-list from the environment. No wildcard.

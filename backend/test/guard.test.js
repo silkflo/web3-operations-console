@@ -28,6 +28,12 @@ const {
   isComposeHostAllowed,
   REQUIRED_NAME_MARKER,
 } = require("../src/db/test-guard");
+const { skipReason } = require("./helpers/test-db");
+
+// The rules themselves are pure, but the one test that checks the REAL
+// configured environment needs a configured test database. Same guard as
+// every other database-dependent test in this suite.
+const skip = skipReason();
 
 const DEV = "postgresql://web3:pw@127.0.0.1:55432/web3_index_dev";
 const TEST = "postgresql://web3:pw@127.0.0.1:55432/web3_index_test";
@@ -403,7 +409,7 @@ test("accepts a properly isolated local test database", () => {
   assert.equal(target.url, TEST);
 });
 
-test("resolves the real configured environment safely", () => {
+test("resolves the real configured environment safely", { skip }, () => {
   // The committed configuration must itself satisfy every rule.
   const target = resolveTestDatabaseUrl();
 

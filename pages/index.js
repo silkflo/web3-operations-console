@@ -24,6 +24,7 @@ import {
   abbreviateAddress,
   abbreviateHash,
   formatEth,
+  plural,
 } from "../lib/contract-intelligence/format";
 import { QUESTIONS } from "../lib/contract-intelligence/constants";
 import {
@@ -53,6 +54,29 @@ const POLL_INTERVAL_LABEL = `${Math.round(POLL_INTERVAL_MS / 1000)}s`;
 
 /** Single API client for the page. No RPC, no Prisma, no database. */
 const api = createWeb3ApiClient();
+
+/**
+ * A synchronization age, in words.
+ *
+ * The API reports seconds, which is the right unit to transmit and the wrong
+ * one to read: "853497s ago" is a number the reader has to divide. The largest
+ * whole unit that still says something is enough here — this is a staleness
+ * indicator, not a timestamp.
+ */
+const AGE_UNITS = [
+  ["day", 86400],
+  ["hour", 3600],
+  ["minute", 60],
+];
+
+const formatAge = (seconds) => {
+  const total = Math.max(0, Math.round(seconds));
+  const unit = AGE_UNITS.find(([, size]) => total >= size);
+
+  return unit
+    ? `${plural(Math.floor(total / unit[1]), unit[0])} ago`
+    : `${total}s ago`;
+};
 
 /** Copy-to-clipboard control with a live-region announcement. */
 const CopyAddress = ({ address, label }) => {
@@ -338,6 +362,19 @@ const Web3Console = () => {
     : "Loading…";
 
   /**
+   * A null chain head is an answer, not a pending read.
+   *
+   * The API replied and could not reach the node, so the height is
+   * unavailable. Only a page with no health payload yet is still loading, and
+   * statusPlaceholder already distinguishes those cases.
+   */
+  const latestBlockDisplay = latestBlock
+    ? `#${latestBlock.toLocaleString()}`
+    : health && !isNotConfigured
+    ? "Unavailable"
+    : statusPlaceholder;
+
+  /**
    * The tile reports the DATA, not the connection.
    *
    * These are two different failures and the page has to separate them: the API
@@ -415,7 +452,7 @@ const Web3Console = () => {
           <StatTile
             icon="⛓"
             label="Latest block"
-            value={latestBlock ? `#${latestBlock.toLocaleString()}` : statusPlaceholder}
+            value={latestBlockDisplay}
             note={latestBlock ? `Refreshes every ${POLL_INTERVAL_LABEL}` : null}
           />
           <StatTile
@@ -462,7 +499,7 @@ const Web3Console = () => {
                 <dt>Last synchronized</dt>
                 <dd>
                   {health.secondsSinceSync !== null
-                    ? `${Math.round(health.secondsSinceSync)}s ago`
+                    ? formatAge(health.secondsSinceSync)
                     : "never"}
                 </dd>
               </div>

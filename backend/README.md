@@ -75,6 +75,8 @@ NEXT_PUBLIC_WEB3_API_URL=http://127.0.0.1:4000 npm run build && npm start
 | `npm test` | Full backend suite |
 | `npm run test:resilience` | Redaction and RPC-failure suites only (no database needed for redaction) |
 
+Database-backed tests require `DATABASE_URL_TEST`; without it they skip cleanly rather than fail, so `npm test` passes on a fresh clone with no database configured.
+
 ## Endpoints
 
 | Route | Returns |
