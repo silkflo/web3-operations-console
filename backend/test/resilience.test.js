@@ -36,6 +36,20 @@ const skip = skipReason();
 /** Never settles. The provider shape that used to hold a request for minutes. */
 const forever = () => new Promise(() => {});
 
+/**
+ * Holds the event loop open for the lifetime of this file.
+ *
+ * forever() models a stalled provider, but a real stalled request keeps an
+ * open socket — a referenced handle — whereas a bare pending promise keeps
+ * nothing. withTimeout deliberately unrefs its timer (see "withTimeout does
+ * not leave the process holding a timer" below), so a test whose only
+ * outstanding work is a forever() call has nothing holding the loop open: it
+ * can drain before the bound fires, and the runner then reports the test
+ * promise as still pending. This supplies the handle the real world would.
+ */
+const loopKeepAlive = setInterval(() => {}, 60000);
+test.after(() => clearInterval(loopKeepAlive));
+
 const rateLimitError = () => {
   const error = new Error("exceeded maximum retry limit");
   error.code = "SERVER_ERROR";
